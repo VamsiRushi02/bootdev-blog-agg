@@ -1,11 +1,20 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
+	"os"
 
+	_ "github.com/lib/pq"
 	"github.com/vamsi/gator/internal/config"
+	"github.com/vamsi/gator/internal/database"
 )
+
+type state struct {
+	db  *database.Queries
+	cfg *config.Config
+}
 
 func main() {
 	cfg, err := config.Read()
@@ -14,15 +23,35 @@ func main() {
 	}
 	fmt.Printf("Read config: %+v\n", cfg)
 
-	err = cfg.SetUser("vamsi")
+	db, err := sql.Open("postgres", cfg.DBURL)
 	if err != nil {
-		log.Fatalf("couldn't set current user: %v\n", err)
+		log.Fatalf("err opening db: %v\n", err)
+	}
+	defer db.Close()
+	dbQueries := database.New(db)
+
+	programState := &state{
+		cfg: &cfg,
+		db:  dbQueries,
 	}
 
-	cfg, err = config.Read()
-	if err != nil {
-		log.Fatalf("error reading config: %v\n", err)
+	cmds := commands{
+		registeredCommands: make(map[string]func(*state, command) error),
 	}
 
-	fmt.Printf("Read config again: %+v\n", cfg)
+	cmds.register("login", handlerLogin)
+	cmds.register("register", handlerRegister)
+
+	if len(os.Args) < 2 {
+		log.Fatal("Usage: cli <command> [args ...]")
+	}
+
+	cmdName := os.Args[1]
+	cmdArgs := os.Args[2:]
+
+	err = cmds.run(programState, command{Name: cmdName, Args: cmdArgs})
+	if err != nil {
+		log.Fatal(err)
+	}
+
 }
